@@ -51,6 +51,19 @@ class PedagogicalController:
         
         self._update_current_focus()
 
+    def update_performance(self, tier: BloomTier, performance_score: float):
+        """
+        Generic entry point for updating performance metrics. 
+        Can be overridden by subclasses (like ZPDController) to track additional data.
+        """
+        self.update_mastery(tier, performance_score)
+
+    def calculate_difficulty_target(self, world_model_capacity: float) -> float:
+        """
+        Returns a target difficulty level. Base controller returns a constant.
+        """
+        return 1.0
+
     def _update_current_focus(self):
         """
         Determine the next tier to focus on based on mastery levels.
@@ -80,3 +93,76 @@ class PedagogicalController:
         for tier in BloomTier:
             self.mastery_scores[tier] = 0.0
         self.current_focus_tier = BloomTier.KNOWLEDGE
+
+class ZPDController(PedagogicalController):
+    """
+    Extends PedagogicalController with Zone of Proximal Development (ZPD) logic.
+    Adjusts task difficulty based on World Model Capacity and agent performance.
+    """
+    def __init__(self, 
+                 base_difficulty: float = 1.0, 
+                 k: float = 0.5, 
+                 mastery_threshold: float = 0.8, 
+                 alpha: float = 0.2):
+        """
+        Initialize the ZPD controller.
+        
+        Args:
+            base_difficulty: Starting difficulty level.
+            k: Scaling factor for World Model Capacity.
+            mastery_threshold: Score required for Bloom tier mastery.
+            alpha: EMA smoothing factor for performance tracking.
+        """
+        super().__init__(mastery_threshold, alpha)
+        self.base_difficulty = base_difficulty
+        self.k = k
+        self.recent_success_rate = 0.75  # Assume mid-range ZPD to start
+        
+    def calculate_difficulty_target(self, world_model_capacity: float) -> float:
+        """
+        Calculates the target difficulty using the formula:
+        Difficulty_Target = Base_Difficulty + (K * World_Model_Capacity)
+        
+        The result is modulated to ensure the agent stays within the ZPD
+        (success rate between 60% and 90%).
+        
+        Args:
+            world_model_capacity: Current capacity in bits (from metrics.py).
+            
+        Returns:
+            The adjusted difficulty level.
+        """
+        raw_target = self.base_difficulty + (self.k * world_model_capacity)
+        
+        # ZPD Constraint: 0.6 <= Success Rate <= 0.9
+        # If success is too low, we scale back difficulty to return to ZPD.
+        if self.recent_success_rate < 0.6:
+            # Scale down linearly based on how far below 60% we are
+            adjustment = self.recent_success_rate / 0.6
+            return raw_target * adjustment
+            
+        # If success is too high, we can safely push the target or even 
+        # accelerate slightly to find the upper bound of ZPD.
+        if self.recent_success_rate > 0.9:
+            # Push slightly harder to find the limit
+            adjustment = self.recent_success_rate / 0.9
+            return raw_target * adjustment
+            
+        return raw_target
+
+    def update_performance(self, tier: BloomTier, performance_score: float):
+        """
+        Updates mastery and ZPD performance tracking.
+        
+        Args:
+            tier: The BloomTier the agent just attempted.
+            performance_score: The score (0.0 to 1.0) achieved.
+        """
+        # Update Bloom mastery via parent
+        self.update_mastery(tier, performance_score)
+        
+        # Update ZPD tracking
+        self.recent_success_rate = (
+            (1 - self.alpha) * self.recent_success_rate + 
+            self.alpha * performance_score
+        )
