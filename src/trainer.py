@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from src.agent import ReasoningAgent
 from src.grpo import IterativeGRPO
 from src.pedagogy import PedagogicalController, BloomTier
+from src.metrics import InformationTheoreticMetrics
 
 class MasteryTrainer:
     def __init__(
@@ -62,8 +63,14 @@ class MasteryTrainer:
         # 2. Extract performance metrics
         # Placeholder metric: check if the final trace is sufficiently detailed
         # and contains logic indicators.
+        initial_trace = refinement_results["best_initial_trace"]
         final_trace = refinement_results["final_trace"]
         success_metric = self._calculate_placeholder_success(final_trace)
+        
+        # Information Gain Calculation
+        info_gain = InformationTheoreticMetrics.calculate_semantic_information_gain(
+            initial_trace, final_trace
+        )
         
         # 3. Update PedagogicalController
         # In a real scenario, we'd only update if the example matches the current target tier
@@ -86,8 +93,36 @@ class MasteryTrainer:
             "target_tier": target_tier.name,
             "example_tier": example_tier.name,
             "success_score": success_metric,
+            "info_gain_bits": info_gain,
             "loss": dummy_loss.item()
         }
+
+    def evaluate_world_model(self, dataset: List[Dict[str, Any]], env_states: int = 100) -> float:
+        """
+        Calculates the aggregate world model capacity across a dataset using 
+        InformationTheoreticMetrics.
+        
+        Args:
+            dataset: List of examples with 'prompt'.
+            env_states: Estimated number of discrete environment states.
+            
+        Returns:
+            Aggregate world model capacity in bits.
+        """
+        total_capacity = 0.0
+        
+        for example in dataset:
+            prompt = example["prompt"]
+            # Get policy logits/probs from agent
+            logits = self.agent.get_logits(prompt)
+            probs = torch.softmax(logits, dim=-1)
+            
+            capacity = InformationTheoreticMetrics.calculate_world_model_capacity(
+                probs, env_states=env_states
+            )
+            total_capacity += capacity
+            
+        return total_capacity / len(dataset) if dataset else 0.0
 
     def _calculate_placeholder_success(self, trace: str) -> float:
         """

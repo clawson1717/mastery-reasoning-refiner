@@ -95,3 +95,31 @@ class ReasoningAgent:
         
         response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         return response.strip()
+
+    def get_logits(self, prompt: str) -> torch.Tensor:
+        """
+        Returns the logits for the last token generated for a given prompt.
+        Used for information-theoretic evaluations.
+        """
+        system_prompt = "You are a helpful assistant that thinks step-by-step before answering."
+        user_prompt = f"Problem: {prompt}\n\nThink step by step and then provide the final answer."
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        
+        with torch.no_grad():
+            outputs = self.model(**model_inputs)
+            # Get logits for the last position
+            logits = outputs.logits[:, -1, :]
+            
+        return logits
