@@ -3,7 +3,7 @@ import torch.optim as optim
 from typing import List, Dict, Any
 from src.agent import ReasoningAgent
 from src.grpo import IterativeGRPO
-from src.pedagogy import PedagogicalController, BloomTier
+from src.pedagogy import PedagogicalController, BloomTier, ZPDController
 from src.metrics import InformationTheoreticMetrics
 
 class MasteryTrainer:
@@ -19,9 +19,13 @@ class MasteryTrainer:
         Orchestrates the training process combining reasoning, GRPO, and pedagogy.
         """
         self.agent = agent
-        self.pedagogy = pedagogical_controller or PedagogicalController()
+        # Use ZPDController by default to implement Step 9 logic
+        self.pedagogy = pedagogical_controller or ZPDController()
         self.grpo = IterativeGRPO(agent, group_size=group_size)
         self.refinement_iterations = refinement_iterations
+        
+        # Current world model capacity estimate (bits)
+        self.current_capacity = 0.0
         
         # Placeholder for model optimizer
         # In a real scenario, we would filter for trainable parameters
@@ -53,36 +57,41 @@ class MasteryTrainer:
         prompt = example["prompt"]
         target_tier = self.pedagogy.get_current_tier()
         
+        # Calculate target difficulty before step based on current capacity
+        difficulty_target = self.pedagogy.calculate_difficulty_target(self.current_capacity)
+        
         # 1. Execute refinement cycles via IterativeGRPO
-        # This simulates the 'experience collection' phase
+        # In a full implementation, difficulty_target would influence task selection 
+        # or reward scaling here.
         refinement_results = self.grpo.run_refinement_cycle(
             prompt, 
             num_iterations=self.refinement_iterations
         )
         
         # 2. Extract performance metrics
-        # Placeholder metric: check if the final trace is sufficiently detailed
-        # and contains logic indicators.
         initial_trace = refinement_results["best_initial_trace"]
         final_trace = refinement_results["final_trace"]
         success_metric = self._calculate_placeholder_success(final_trace)
+        
+        # Update World Model Capacity estimate
+        logits = self.agent.get_logits(prompt)
+        self.current_capacity = InformationTheoreticMetrics.calculate_world_model_capacity(
+            torch.softmax(logits, dim=-1), env_states=100
+        )
         
         # Information Gain Calculation
         info_gain = InformationTheoreticMetrics.calculate_semantic_information_gain(
             initial_trace, final_trace
         )
         
-        # 3. Update PedagogicalController
-        # In a real scenario, we'd only update if the example matches the current target tier
-        # or use the example's own tier metadata.
+        # 3. Update PedagogicalController (handles Bloom mastery and ZPD tracking)
         example_tier = example.get("tier", target_tier)
-        self.pedagogy.update_mastery(example_tier, success_metric)
+        self.pedagogy.update_performance(example_tier, success_metric)
         
         # 4. Placeholder for Model Parameter Updates
         self.optimizer.zero_grad()
         
         # Simulate loss computation
-        # loss = -torch.mean(log_probs * scores)
         dummy_loss = torch.tensor(1.0 - success_metric, requires_grad=True)
         dummy_loss.backward()
         
@@ -92,6 +101,8 @@ class MasteryTrainer:
             "prompt": prompt,
             "target_tier": target_tier.name,
             "example_tier": example_tier.name,
+            "difficulty_target": difficulty_target,
+            "world_model_capacity": self.current_capacity,
             "success_score": success_metric,
             "info_gain_bits": info_gain,
             "loss": dummy_loss.item()
