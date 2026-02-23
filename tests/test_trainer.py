@@ -15,8 +15,10 @@ def mock_agent():
         "Detailed logic because of X and Y, since Z is true.",
         "Step by step analysis."
     ]
+    # Mock get_logits to return a tensor
+    agent.get_logits.return_value = torch.randn(1, 1000)
     # Mock refine_reasoning to return a string
-    agent.refine_reasoning.return_value = "Refined reasoning: therefore the answer is 42."
+    agent.refine_reasoning.return_value = "Thought: Refined reasoning: therefore the answer is 42."
     # Mock device for torch tensors
     agent.model = MagicMock()
     agent.model.device = "cpu"
