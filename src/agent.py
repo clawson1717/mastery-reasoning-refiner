@@ -21,7 +21,7 @@ class ReasoningAgent:
             trust_remote_code=True
         )
 
-    def generate_reasoning(self, prompt: str) -> str:
+    def generate_reasoning(self, prompt: str, num_samples: int = 1, temperature: float = 0.7) -> list[str]:
         system_prompt = "You are a helpful assistant that thinks step-by-step before answering."
         user_prompt = f"Problem: {prompt}\n\nThink step by step and then provide the final answer."
         
@@ -42,14 +42,55 @@ class ReasoningAgent:
             **model_inputs,
             max_new_tokens=512,
             do_sample=True,
-            temperature=0.7,
+            temperature=temperature,
             top_p=0.9,
+            num_return_sequences=num_samples,
             pad_token_id=self.tokenizer.eos_token_id
         )
         
         # Extract only the generated part
+        input_length = model_inputs.input_ids.shape[1]
         generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            output_ids[input_length:] for output_ids in generated_ids
+        ]
+        
+        responses = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+        return [r.strip() for r in responses]
+
+    def refine_reasoning(self, prompt: str, previous_reasoning: str, temperature: float = 0.5) -> str:
+        system_prompt = "You are a helpful assistant that refines and improves reasoning traces."
+        user_prompt = (
+            f"Problem: {prompt}\n\n"
+            f"Previous Reasoning Trace:\n{previous_reasoning}\n\n"
+            "Analyze the previous reasoning, identify any errors or areas for improvement, "
+            "and provide a refined, more accurate, and clearer reasoning trace with the final answer."
+        )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        
+        generated_ids = self.model.generate(
+            **model_inputs,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=temperature,
+            top_p=0.9,
+            pad_token_id=self.tokenizer.eos_token_id
+        )
+        
+        input_length = model_inputs.input_ids.shape[1]
+        generated_ids = [
+            output_ids[input_length:] for output_ids in generated_ids
         ]
         
         response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
