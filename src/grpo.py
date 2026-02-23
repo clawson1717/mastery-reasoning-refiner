@@ -1,25 +1,25 @@
 import torch
 import numpy as np
 from src.agent import ReasoningAgent
+from src.reward_model import ChecklistRewardModel
 
 class IterativeGRPO:
-    def __init__(self, agent: ReasoningAgent, group_size: int = 4):
+    def __init__(self, agent: ReasoningAgent, group_size: int = 4, reward_model: ChecklistRewardModel = None):
         """
         Initializes the Iterative GRPO module.
         
         Args:
             agent: The ReasoningAgent instance to use for generation.
             group_size: Number of samples to generate in each GRPO group.
+            reward_model: A ChecklistRewardModel instance. If None, a default one is created.
         """
         self.agent = agent
         self.group_size = group_size
+        self.reward_model = reward_model or ChecklistRewardModel()
 
     def score_responses(self, prompt: str, responses: list[str]) -> torch.Tensor:
         """
-        Implements a simple relative scoring mechanism.
-        
-        In Step 7, this will be replaced with a checklist-based reward model.
-        Current heuristic: length + presence of keywords + formatting.
+        Implements a relative scoring mechanism using the checklist reward model.
         
         Args:
             prompt: The original problem prompt.
@@ -30,26 +30,9 @@ class IterativeGRPO:
         """
         scores = []
         for res in responses:
-            score = 0.0
-            # Length heuristic (favoring moderately long reasoning)
-            # Penalize very short responses, reward substance up to a point
-            res_len = len(res)
-            if res_len < 50:
-                score -= 1.0
-            elif 100 < res_len < 800:
-                score += 1.0
-            
-            # Keyword heuristic (presence of logic indicators)
-            keywords = ["step", "therefore", "conclude", "because", "since", "analysis"]
-            for kw in keywords:
-                if kw in res.lower():
-                    score += 0.2
-            
-            # Format heuristic (Markdown bolding or lists often indicate structured thought)
-            if "**" in res or "- " in res:
-                score += 0.5
-                
-            scores.append(score)
+            # Use the checklist-based reward model
+            reward = self.reward_model.calculate_reward(res)
+            scores.append(reward)
         
         # Convert to tensor
         scores_tensor = torch.tensor(scores, dtype=torch.float32)
