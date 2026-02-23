@@ -1,11 +1,34 @@
 import pytest
-from src.pedagogy import PedagogicalController, BloomTier
+from src.pedagogy import PedagogicalController, BloomTier, ZPDController
 
 def test_initialization():
     controller = PedagogicalController(mastery_threshold=0.8)
     assert controller.get_current_tier() == BloomTier.KNOWLEDGE
     report = controller.get_mastery_report()
     assert all(score == 0.0 for score in report.values())
+
+def test_zpd_controller_calculation():
+    # Base difficulty 1.0, k=0.5. 
+    # Capacity 10 bits. 
+    # Target = 1.0 + (0.5 * 10) = 6.0
+    controller = ZPDController(base_difficulty=1.0, k=0.5, alpha=1.0)
+    
+    # Within ZPD (default success 0.75)
+    target = controller.calculate_difficulty_target(world_model_capacity=10.0)
+    assert target == 6.0
+    
+    # Below ZPD (Success < 0.6)
+    controller.update_performance(BloomTier.KNOWLEDGE, 0.3) 
+    # Success rate becomes 0.3 (since alpha=1.0)
+    # Target = 6.0 * (0.3 / 0.6) = 3.0
+    target = controller.calculate_difficulty_target(world_model_capacity=10.0)
+    assert target == 3.0
+    
+    # Above ZPD (Success > 0.9)
+    controller.update_performance(BloomTier.KNOWLEDGE, 0.99)
+    # Target = 6.0 * (0.99 / 0.9) = 6.6
+    target = controller.calculate_difficulty_target(world_model_capacity=10.0)
+    assert target == pytest.approx(6.6)
 
 def test_mastery_progression():
     # Set alpha to 1.0 for predictable updates in test
